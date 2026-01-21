@@ -41,12 +41,9 @@
   }
 
   function applyData(target, label, data) {
-    var name = data['business-name'] || '';
     var address = data['business-address'] || '';
-    if (label) label.textContent = 'Headquarters';
-    target.innerHTML =
-      '<strong>' + escapeHtml(name) + '</strong><br>' +
-      escapeHtml(address).replace(/\n/g, '<br>');
+    if (label) label.textContent = 'Registered Address';
+    target.innerHTML = escapeHtml(address).replace(/\n/g, '<br>');
   }
 
   function initObserver() {
