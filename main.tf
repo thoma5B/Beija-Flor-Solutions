@@ -40,12 +40,12 @@ resource "aws_s3_bucket_public_access_block" "website" {
 # --- 3. Upload Website Content ---
 # This uploads everything in the 'website' folder automatically
 resource "aws_s3_object" "content" {
-  for_each = fileset("${path.module}/website", "**")
+  for_each = fileset("${path.module}/beijaflorsolutions/dist", "**")
 
   bucket = aws_s3_bucket.website.id
   key    = each.value
-  source = "${path.module}/website/${each.value}"
-  etag   = filemd5("${path.module}/website/${each.value}")
+  source = "${path.module}/beijaflorsolutions/dist/${each.value}"
+  etag   = filemd5("${path.module}/beijaflorsolutions/dist/${each.value}")
 
   # Simple Content-Type detection
   content_type = lookup({
