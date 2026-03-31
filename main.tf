@@ -253,11 +253,12 @@ resource "aws_ses_domain_identity" "main" {
 }
 
 resource "aws_route53_record" "ses_verification" {
-  zone_id = aws_route53_zone.main.zone_id
-  name    = "_amazonses.${var.domain_name}"
-  type    = "TXT"
-  ttl     = 600
-  records = [aws_ses_domain_identity.main.verification_token]
+  zone_id         = aws_route53_zone.main.zone_id
+  name            = "_amazonses.${var.domain_name}"
+  type            = "TXT"
+  ttl             = 600
+  records         = [aws_ses_domain_identity.main.verification_token]
+  allow_overwrite = false
 }
 
 resource "aws_ses_domain_identity_verification" "main" {
@@ -271,12 +272,13 @@ resource "aws_ses_domain_dkim" "main" {
 }
 
 resource "aws_route53_record" "ses_dkim" {
-  count   = 3
-  zone_id = aws_route53_zone.main.zone_id
-  name    = "${aws_ses_domain_dkim.main.dkim_tokens[count.index]}._domainkey.${var.domain_name}"
-  type    = "CNAME"
-  ttl     = 600
-  records = ["${aws_ses_domain_dkim.main.dkim_tokens[count.index]}.dkim.amazonses.com"]
+  count           = 3
+  zone_id         = aws_route53_zone.main.zone_id
+  name            = "${aws_ses_domain_dkim.main.dkim_tokens[count.index]}._domainkey.${var.domain_name}"
+  type            = "CNAME"
+  ttl             = 600
+  records         = ["${aws_ses_domain_dkim.main.dkim_tokens[count.index]}.dkim.amazonses.com"]
+  allow_overwrite = true
 }
 
 # SES Mail From (optional but improves deliverability)
@@ -286,19 +288,21 @@ resource "aws_ses_domain_mail_from" "main" {
 }
 
 resource "aws_route53_record" "ses_mail_from_mx" {
-  zone_id = aws_route53_zone.main.zone_id
-  name    = "mail.${var.domain_name}"
-  type    = "MX"
-  ttl     = 600
-  records = ["10 feedback-smtp.us-east-1.amazonses.com"]
+  zone_id         = aws_route53_zone.main.zone_id
+  name            = "mail.${var.domain_name}"
+  type            = "MX"
+  ttl             = 600
+  records         = ["10 feedback-smtp.us-east-1.amazonses.com"]
+  allow_overwrite = true
 }
 
 resource "aws_route53_record" "ses_mail_from_spf" {
-  zone_id = aws_route53_zone.main.zone_id
-  name    = "mail.${var.domain_name}"
-  type    = "TXT"
-  ttl     = 600
-  records = ["v=spf1 include:amazonses.com -all"]
+  zone_id         = aws_route53_zone.main.zone_id
+  name            = "mail.${var.domain_name}"
+  type            = "TXT"
+  ttl             = 600
+  records         = ["v=spf1 include:amazonses.com -all"]
+  allow_overwrite = true
 }
 
 # --- Backend: IAM Role for Lambda ---
@@ -382,7 +386,13 @@ resource "aws_apigatewayv2_api" "auth" {
   protocol_type = "HTTP"
 
   cors_configuration {
-    allow_origins = ["https://${var.domain_name}", "https://www.${var.domain_name}", "http://localhost:*"]
+    allow_origins = [
+      "https://${var.domain_name}",
+      "https://www.${var.domain_name}",
+      "http://localhost:5173",
+      "http://localhost:3000",
+      "http://localhost:8080"
+    ]
     allow_methods = ["POST", "OPTIONS"]
     allow_headers = ["Content-Type"]
     max_age       = 3600

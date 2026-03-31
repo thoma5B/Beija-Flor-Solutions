@@ -43,20 +43,38 @@ async function handleSendCode(body) {
 
   const sanitizedName = (name || "").replace(/[<>&"'/]/g, "").slice(0, 100);
   const normalizedEmail = email.trim().toLowerCase();
+  const now = Date.now();
 
-  // Global rate-limit check (any request to this endpoint)
-  const globalEntry = await ddb.send(
-    new GetCommand({ TableName: TABLE_NAME, Key: { email: GLOBAL_RATE_KEY } })
-  );
-
-  if (globalEntry.Item && globalEntry.Item.sentAt) {
-    const elapsed = Date.now() - globalEntry.Item.sentAt;
-    if (elapsed < RATE_LIMIT_MS) {
+  // Atomic global rate-limit: only succeeds if no entry exists OR sentAt is old enough
+  try {
+    await ddb.send(
+      new PutCommand({
+        TableName: TABLE_NAME,
+        Item: {
+          email: GLOBAL_RATE_KEY,
+          sentAt: now,
+          ttl: Math.floor(now / 1000) + 60,
+        },
+        ConditionExpression:
+          "attribute_not_exists(sentAt) OR sentAt < :cutoff",
+        ExpressionAttributeValues: {
+          ":cutoff": now - RATE_LIMIT_MS,
+        },
+      })
+    );
+  } catch (err) {
+    if (err.name === "ConditionalCheckFailedException") {
+      // Fetch to tell the user how long to wait
+      const globalEntry = await ddb.send(
+        new GetCommand({ TableName: TABLE_NAME, Key: { email: GLOBAL_RATE_KEY } })
+      );
+      const elapsed = now - (globalEntry.Item?.sentAt ?? 0);
       const waitSeconds = Math.ceil((RATE_LIMIT_MS - elapsed) / 1000);
       return response(429, {
         error: `Please wait ${waitSeconds} seconds before requesting a new code`,
       });
     }
+    throw err;
   }
 
   // Per-email rate-limit check
@@ -64,31 +82,15 @@ async function handleSendCode(body) {
     new GetCommand({ TableName: TABLE_NAME, Key: { email: normalizedEmail } })
   );
 
-  if (existing.Item && existing.Item.sentAt) {
-    const elapsed = Date.now() - existing.Item.sentAt;
-    if (elapsed < RATE_LIMIT_MS) {
-      const waitSeconds = Math.ceil((RATE_LIMIT_MS - elapsed) / 1000);
-      return response(429, {
-        error: `Please wait ${waitSeconds} seconds before requesting a new code`,
-      });
-    }
+  if (existing.Item?.sentAt && now - existing.Item.sentAt < RATE_LIMIT_MS) {
+    const waitSeconds = Math.ceil((RATE_LIMIT_MS - (now - existing.Item.sentAt)) / 1000);
+    return response(429, {
+      error: `Please wait ${waitSeconds} seconds before requesting a new code`,
+    });
   }
 
   const code = generateCode();
-  const ttl = Math.floor(Date.now() / 1000) + CODE_TTL_SECONDS;
-  const now = Date.now();
-
-  // Update global rate-limit entry
-  await ddb.send(
-    new PutCommand({
-      TableName: TABLE_NAME,
-      Item: {
-        email: GLOBAL_RATE_KEY,
-        sentAt: now,
-        ttl: Math.floor(now / 1000) + 60, // auto-cleanup after 60s
-      },
-    })
-  );
+  const ttl = Math.floor(now / 1000) + CODE_TTL_SECONDS;
 
   // Store code in DynamoDB
   await ddb.send(
