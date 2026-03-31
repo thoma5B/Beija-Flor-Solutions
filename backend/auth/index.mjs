@@ -5,6 +5,7 @@ import {
   PutCommand,
   GetCommand,
   DeleteCommand,
+  UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import crypto from "crypto";
 
@@ -18,6 +19,8 @@ const CODE_TTL_SECONDS = 600; // 10 minutes
 const MAX_VERIFY_ATTEMPTS = 3;
 
 const GLOBAL_RATE_KEY = "__GLOBAL_RATE_LIMIT__";
+const RT_VERIFICATION = "verification";
+const RT_CHAT = "chat";
 
 const headers = {
   "Content-Type": "application/json",
@@ -52,6 +55,7 @@ async function handleSendCode(body) {
         TableName: TABLE_NAME,
         Item: {
           email: GLOBAL_RATE_KEY,
+          recordType: RT_VERIFICATION,
           sentAt: now,
           ttl: Math.floor(now / 1000) + 60,
         },
@@ -66,7 +70,7 @@ async function handleSendCode(body) {
     if (err.name === "ConditionalCheckFailedException") {
       // Fetch to tell the user how long to wait
       const globalEntry = await ddb.send(
-        new GetCommand({ TableName: TABLE_NAME, Key: { email: GLOBAL_RATE_KEY } })
+        new GetCommand({ TableName: TABLE_NAME, Key: { email: GLOBAL_RATE_KEY, recordType: RT_VERIFICATION } })
       );
       const elapsed = now - (globalEntry.Item?.sentAt ?? 0);
       const waitSeconds = Math.ceil((RATE_LIMIT_MS - elapsed) / 1000);
@@ -79,7 +83,7 @@ async function handleSendCode(body) {
 
   // Per-email rate-limit check
   const existing = await ddb.send(
-    new GetCommand({ TableName: TABLE_NAME, Key: { email: normalizedEmail } })
+    new GetCommand({ TableName: TABLE_NAME, Key: { email: normalizedEmail, recordType: RT_VERIFICATION } })
   );
 
   if (existing.Item?.sentAt && now - existing.Item.sentAt < RATE_LIMIT_MS) {
@@ -98,6 +102,7 @@ async function handleSendCode(body) {
       TableName: TABLE_NAME,
       Item: {
         email: normalizedEmail,
+        recordType: RT_VERIFICATION,
         code,
         name: sanitizedName,
         sentAt: now,
@@ -148,7 +153,7 @@ async function handleVerifyCode(body) {
   const normalizedEmail = email.trim().toLowerCase();
 
   const result = await ddb.send(
-    new GetCommand({ TableName: TABLE_NAME, Key: { email: normalizedEmail } })
+    new GetCommand({ TableName: TABLE_NAME, Key: { email: normalizedEmail, recordType: RT_VERIFICATION } })
   );
 
   if (!result.Item) {
@@ -157,7 +162,7 @@ async function handleVerifyCode(body) {
 
   if (result.Item.attempts >= MAX_VERIFY_ATTEMPTS) {
     await ddb.send(
-      new DeleteCommand({ TableName: TABLE_NAME, Key: { email: normalizedEmail } })
+      new DeleteCommand({ TableName: TABLE_NAME, Key: { email: normalizedEmail, recordType: RT_VERIFICATION } })
     );
     return response(429, { error: "Too many attempts. Please request a new code." });
   }
@@ -174,10 +179,44 @@ async function handleVerifyCode(body) {
 
   // Success – clean up
   await ddb.send(
-    new DeleteCommand({ TableName: TABLE_NAME, Key: { email: normalizedEmail } })
+    new DeleteCommand({ TableName: TABLE_NAME, Key: { email: normalizedEmail, recordType: RT_VERIFICATION } })
   );
 
   return response(200, { message: "Verified", email: normalizedEmail, name: result.Item.name });
+}
+
+async function handleChatMessage(body) {
+  const { email, role, content } = body;
+
+  if (!email || !role || !content) {
+    return response(400, { error: "email, role, and content are required" });
+  }
+
+  if (!["user", "assistant"].includes(role)) {
+    return response(400, { error: "role must be 'user' or 'assistant'" });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const now = Date.now();
+
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { email: normalizedEmail, recordType: RT_CHAT },
+      UpdateExpression:
+        "SET createdAt = if_not_exists(createdAt, :now), #msgs = list_append(if_not_exists(#msgs, :empty), :newMsg), updatedAt = :now",
+      ExpressionAttributeNames: {
+        "#msgs": "messages",
+      },
+      ExpressionAttributeValues: {
+        ":now": now,
+        ":empty": [],
+        ":newMsg": [{ role, content, timestamp: now }],
+      },
+    })
+  );
+
+  return response(200, { message: "Message stored" });
 }
 
 export const handler = async (event) => {
@@ -206,6 +245,10 @@ export const handler = async (event) => {
 
   if (path.endsWith("/auth/verification-code")) {
     return handleVerifyCode(body);
+  }
+
+  if (path.endsWith("/chat/message")) {
+    return handleChatMessage(body);
   }
 
   return response(404, { error: "Not found" });

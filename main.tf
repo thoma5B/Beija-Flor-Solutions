@@ -226,14 +226,20 @@ resource "aws_route53_record" "apex" {
   }
 }
 
-# --- Backend: DynamoDB Table for Verification Codes ---
-resource "aws_dynamodb_table" "verification_codes" {
-  name         = "beijaflor-verification-codes"
+# --- Backend: DynamoDB Table (unified) ---
+resource "aws_dynamodb_table" "data" {
+  name         = "beijaflor-data"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "email"
+  range_key    = "recordType"
 
   attribute {
     name = "email"
+    type = "S"
+  }
+
+  attribute {
+    name = "recordType"
     type = "S"
   }
 
@@ -241,6 +247,7 @@ resource "aws_dynamodb_table" "verification_codes" {
     attribute_name = "ttl"
     enabled        = true
   }
+
 
   tags = {
     Project = "beijaflorsolutions"
@@ -345,9 +352,10 @@ resource "aws_iam_role_policy" "lambda_auth" {
         Action = [
           "dynamodb:GetItem",
           "dynamodb:PutItem",
-          "dynamodb:DeleteItem"
+          "dynamodb:DeleteItem",
+          "dynamodb:UpdateItem"
         ]
-        Resource = aws_dynamodb_table.verification_codes.arn
+        Resource = aws_dynamodb_table.data.arn
       }
     ]
   })
@@ -372,7 +380,7 @@ resource "aws_lambda_function" "auth" {
 
   environment {
     variables = {
-      TABLE_NAME   = aws_dynamodb_table.verification_codes.name
+      TABLE_NAME   = aws_dynamodb_table.data.name
       SENDER_EMAIL = var.sender_email
     }
   }
@@ -433,6 +441,18 @@ resource "aws_apigatewayv2_route" "auth_email_options" {
 resource "aws_apigatewayv2_route" "auth_verify_options" {
   api_id    = aws_apigatewayv2_api.auth.id
   route_key = "OPTIONS /auth/verification-code"
+  target    = "integrations/${aws_apigatewayv2_integration.auth.id}"
+}
+
+resource "aws_apigatewayv2_route" "chat_message" {
+  api_id    = aws_apigatewayv2_api.auth.id
+  route_key = "POST /chat/message"
+  target    = "integrations/${aws_apigatewayv2_integration.auth.id}"
+}
+
+resource "aws_apigatewayv2_route" "chat_message_options" {
+  api_id    = aws_apigatewayv2_api.auth.id
+  route_key = "OPTIONS /chat/message"
   target    = "integrations/${aws_apigatewayv2_integration.auth.id}"
 }
 
