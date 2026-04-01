@@ -135,7 +135,7 @@ resource "aws_iam_role_policy" "lambda_auth" {
 # --- Lambda Function ---
 data "archive_file" "auth_lambda" {
   type        = "zip"
-  source_dir  = "${path.module}/backend/auth"
+  source_dir  = "${path.module}/backend/auth/dist"
   output_path = "${path.module}/backend/auth.zip"
 }
 
@@ -259,4 +259,3 @@ resource "local_file" "frontend_env" {
   filename = "${path.module}/beijaflorsolutions/.env"
   content  = "VITE_BACKEND_URL=${aws_apigatewayv2_stage.auth.invoke_url}\n"
 }
-

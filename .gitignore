@@ -9,6 +9,10 @@ my_*
 # Lambda packages
 *.zip
 
+# Lambda build output
+backend/auth/dist/
+backend/auth/node_modules/
+
 # Docker
 .dockerignore
 

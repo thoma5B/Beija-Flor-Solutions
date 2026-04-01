@@ -2,13 +2,17 @@ TF_DIR ?= .
 AWS_PROFILE ?= thomasbunke
 TF = terraform -chdir=$(TF_DIR)
 PLAN_FILE = tfplan
+BACKEND_DIR = backend/auth
 
-.PHONY: init plan apply deploy invalidate outputs fmt clean cloudfront-id
+.PHONY: init plan apply deploy invalidate outputs fmt clean cloudfront-id build-backend
 
 init:
 	$(TF) init -input=false
 
-plan: init
+build-backend:
+	cd $(BACKEND_DIR) && npm install && npm run build
+
+plan: init build-backend
 	$(TF) plan -out=$(PLAN_FILE)
 
 apply: plan
